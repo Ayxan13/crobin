@@ -1,2 +1,2 @@
 # crobin
-robin map implementation in ANSI C
+Robin map implementation in ANSI C
