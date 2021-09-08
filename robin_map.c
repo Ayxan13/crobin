@@ -42,14 +42,14 @@ typedef struct rm_element
 {
     char *key;
     int value;
-    int psl; /* probe sequence lengths */
+    unsigned psl; /* probe sequence lengths */
 } rm_element;
 
 static size_t strhash(char *str)
 {
     enum { multiplier = 31 };
     size_t hash = 0;
-    unsigned char *p = (unsigned char *) str;
+    unsigned char *p = (unsigned char *)str;
 
     for (; *p; ++p)
         hash = multiplier * hash + *p;
@@ -66,11 +66,6 @@ static rm_element *alloc_elements(size_t size)
     return xcalloc(size, sizeof(rm_element));
 }
 
-static bool slot_is_dead(rm_element *slot)
-{
-    return slot->psl == -1;
-}
-
 static bool slot_is_occupied(rm_element *slot)
 {
     return slot->key != NULL;
@@ -78,8 +73,8 @@ static bool slot_is_occupied(rm_element *slot)
 
 static void rehash(robin_map *map)
 {
-    /* 
-     * Since our hash algorithm is good, 
+    /*
+     * Since our hash algorithm is good,
      * a growth factor of 2 should be fine
      **/
     enum { growth_factor = 2 };
@@ -91,7 +86,8 @@ static void rehash(robin_map *map)
     map->buffer_size *= growth_factor;
     map->data = alloc_elements(map->buffer_size);
 
-    for (i = 0; i != old_buffer_size; ++i) {
+    for (i = 0; i != old_buffer_size; ++i)
+    {
         size_t index;
 
         if (!slot_is_occupied(old_buffer + i))
@@ -100,14 +96,18 @@ static void rehash(robin_map *map)
         old_buffer[i].psl = 0;
         index = strhash(old_buffer[i].key) % map->buffer_size;
 
-        for (;; ++old_buffer[i].psl, index = (index + 1) % map->buffer_size) {
-            rm_element *slot = ((rm_element *) map->data) + index;
+        for (;; ++old_buffer[i].psl, index = (index + 1) % map->buffer_size)
+        {
+            rm_element *slot = ((rm_element *)map->data) + index;
 
-            if (!slot_is_occupied(slot)) {
+            if (!slot_is_occupied(slot))
+            {
                 *slot = old_buffer[i];
+                break;
             }
 
-            if (old_buffer[i].psl > slot->psl) {
+            if (old_buffer[i].psl > slot->psl)
+            {
                 rm_element tmp = old_buffer[i];
                 old_buffer[i] = *slot;
                 *slot = tmp;
@@ -121,7 +121,7 @@ static void rehash(robin_map *map)
 static void grow_and_rehash_if_needed(robin_map *map)
 {
     double max_load_factor = 0.7;
-    double load_factor = ((double) map->element_count) / map->buffer_size;
+    double load_factor = ((double)map->element_count) / map->buffer_size;
 
     if (load_factor >= max_load_factor)
         rehash(map);
@@ -161,17 +161,15 @@ static rm_element *rm_get_impl(robin_map *map, char *key)
 {
     rm_element *buffer = map->data;
     size_t index = 0;
-    int psl = 0;
+    unsigned psl = 0;
 
     index = strhash(key) % map->buffer_size;
 
-    for (;; ++psl, index = (index + 1) % map->buffer_size) {
+    for (;; ++psl, index = (index + 1) % map->buffer_size)
+    {
         rm_element *slot = buffer + index;
 
-        if (slot_is_dead(slot))
-            continue;
-
-        if (!slot_is_occupied(slot) || slot->psl > psl)
+        if (!slot_is_occupied(slot) || psl > slot->psl)
             return NULL;
 
         if (strcmp(key, slot->key) == 0)
@@ -187,43 +185,79 @@ int *rm_get(robin_map *map, char *key)
 
 int *rm_put(robin_map *map, char *key, int value)
 {
-    rm_element new_elem;
-    rm_element *buffer = map->data;
-    size_t index = strhash(key) % map->buffer_size;
+    rm_element new_element;
+    size_t index; /* Hashing _must_ happen after rehashing */
     bool key_is_duplicated = false;
+    int *newly_inserted = NULL;
 
     grow_and_rehash_if_needed(map);
 
-    new_elem.key = key;
-    new_elem.psl = 0;
-    new_elem.value = value;
+    index = strhash(key) % map->buffer_size;
 
-    for (;; ++new_elem.psl, index = (index + 1) % map->buffer_size) {
-        rm_element *slot = buffer + index;
+    new_element.key = key;
+    new_element.value = value;
+    new_element.psl = 0;
 
-        if (!slot_is_occupied(slot)) {
-            *slot = new_elem;
+    for (;; ++new_element.psl, index = (index + 1) % map->buffer_size)
+    {
+        rm_element *slot = (rm_element *)(map->data) + index;
 
-            if (!key_is_duplicated)
-                slot->key = str_dup(slot->key);
-
+        if (!slot_is_occupied(slot))
+        {
+            *slot = new_element;
             ++map->element_count;
 
-            return &buffer[index].value;
+            if (!key_is_duplicated)
+            {
+                slot->key = str_dup(slot->key);
+                newly_inserted = &slot->value;
+            }
+            break;
         }
 
-        if (strcmp(slot->key, new_elem.key) == 0) {
-            slot->value = new_elem.value;
-            return &slot->value;
-        }
-
-        if (slot->psl > new_elem.psl) {
-            rm_element tmp = new_elem;
-            new_elem = *slot;
+        if (new_element.psl > slot->psl)
+        {
+            rm_element tmp = new_element;
+            new_element = *slot;
             *slot = tmp;
 
-            slot->key = str_dup(slot->key);
-            key_is_duplicated = true;
+            if (!key_is_duplicated)
+            {
+                slot->key = str_dup(slot->key);
+                key_is_duplicated = true;
+                newly_inserted = &slot->value;
+            }
+        }
+
+        if (!key_is_duplicated && strcmp(slot->key, new_element.key) == 0)
+        {
+            slot->value = new_element.value;
+            newly_inserted = &slot->value;
+            break;
+        }
+    }
+    return newly_inserted;
+}
+
+static void rm_pop_element(robin_map *map, rm_element *slot)
+{
+    rm_element *buffer = map->data;
+    size_t i = slot - buffer;
+
+    free(slot->key);
+    
+    --(map->element_count);
+
+    for (;;) {
+        size_t prev = i;
+        i = (i + 1) % map->buffer_size;
+
+        if (buffer[i].psl == 0) {
+            buffer[prev].key = NULL;
+            break;
+        } else {
+            buffer[prev] = buffer[i];
+            --(buffer[prev].psl);
         }
     }
 }
@@ -231,27 +265,13 @@ int *rm_put(robin_map *map, char *key, int value)
 int rm_remove(robin_map *map, char *key)
 {
     rm_element *slot = rm_get_impl(map, key);
-    if (!slot)
-        return 0;
+    int popped = 0;
 
-    free(slot->key);
-    slot->key = NULL;
-    slot->psl = -1;
-    --map->element_count;
-
-    return slot->value;
-}
-
-// TODO delete this
-void print_map(robin_map *map)
-{
-    system("cls");
-    size_t i;
-    int printf(char const *, ...);
-    rm_element *data = map->data;
-    printf("%3zu - %2zu\n--------------------------\n", map->element_count, map->buffer_size);
-
-    for (i = 0; i != map->buffer_size; ++i) {
-        printf("%3zu. %10s -> %4d | pls: %d\n", i, data[i].key, data[i].value, data[i].psl);
+    if (slot)
+    {
+        popped = slot->value;
+        rm_pop_element(map, slot);
     }
+
+    return popped;
 }

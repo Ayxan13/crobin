@@ -2,12 +2,18 @@
 #define ROBIN_MAP_H
 #pragma once
 
+#include <stddef.h> /* size_t */
+
 typedef struct robin_map
 {
     size_t buffer_size;
     size_t element_count;
     void *data;
 } robin_map;
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 robin_map rm_init();
 
@@ -22,5 +28,9 @@ int *rm_put(robin_map *map, char *key, int value);
 
 /* Returns removed value. Returns 0 if value not found */
 int rm_remove(robin_map *map, char *key);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* ROBIN_MAP_H */
