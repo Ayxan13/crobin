@@ -4,7 +4,7 @@ This is an implementation of a "string to int" hash table with [Robin Hood hashi
 
 Sample usage:
 
-```
+```c
 #include <stdio.h>
 #include "robin_map.h"
 
